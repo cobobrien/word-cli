@@ -108,15 +108,26 @@ class ASTToDocxConverter:
         
         try:
             # Use Pandoc to convert JSON to DOCX
-            result = subprocess.run([
+            cmd = [
                 self.pandoc_path,
                 str(json_path),
                 "--from", "json",
                 "--to", "docx",
                 "--output", str(temp_docx_path),
                 "--standalone",
-                "--reference-doc", self._get_reference_template()
-            ], capture_output=True, text=True, check=True)
+            ]
+            reference_template = self._get_reference_template()
+            # Only pass reference-doc if we have a valid template path
+            if reference_template:
+                try:
+                    ref_path = Path(reference_template)
+                    if ref_path.exists():
+                        cmd.extend(["--reference-doc", str(ref_path)])
+                except Exception:
+                    # If template resolution fails, proceed without it
+                    pass
+
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
             
             return temp_docx_path
             
@@ -127,11 +138,15 @@ class ASTToDocxConverter:
             if json_path.exists():
                 json_path.unlink()
     
-    def _get_reference_template(self) -> str:
-        """Get path to reference template for Pandoc."""
-        # For now, use default template
-        # In production, might want to include a custom template
-        return ""
+    def _get_reference_template(self) -> Optional[str]:
+        """Get path to reference template for Pandoc, if available.
+
+        Returns a filesystem path string if a template is configured and exists,
+        otherwise returns None so we avoid passing an empty argument to Pandoc.
+        """
+        # For now, no default template is bundled.
+        # Future enhancement: read from config and return a real path if configured.
+        return None
     
     def _enhance_with_metadata(self, base_docx_path: Path, metadata: WordMetadata) -> DocxDocument:
         """Enhance base DOCX with preserved metadata."""

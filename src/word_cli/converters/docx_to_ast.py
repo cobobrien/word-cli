@@ -101,14 +101,16 @@ class DocxToASTConverter:
         """Extract document structure as Pandoc AST."""
         try:
             # Use Pandoc to convert DOCX to JSON AST
-            result = subprocess.run([
-                self.pandoc_path,
-                str(docx_path),
-                "--to", "json",
-                "--standalone",
-                "--wrap=preserve",  # Preserve line breaks
-                "--extract-media", str(docx_path.parent / "media")  # Extract images
-            ], capture_output=True, text=True, check=True)
+            # Route extracted media to a temporary directory to avoid polluting user folders
+            with tempfile.TemporaryDirectory() as media_dir:
+                result = subprocess.run([
+                    self.pandoc_path,
+                    str(docx_path),
+                    "--to", "json",
+                    "--standalone",
+                    "--wrap=preserve",  # Preserve line breaks
+                    "--extract-media", media_dir
+                ], capture_output=True, text=True, check=True)
             
             pandoc_json = json.loads(result.stdout)
             return PandocAST.from_pandoc_json(pandoc_json)

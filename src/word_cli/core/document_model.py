@@ -10,15 +10,15 @@ from typing import Any, Dict, List, Optional, Union
 from dataclasses import dataclass, field
 from uuid import uuid4
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class PandocAST(BaseModel):
     """Wrapper for Pandoc AST representation of document content."""
     
     version: str = "1.23"
-    blocks: List[Dict[str, Any]] = field(default_factory=list)
-    meta: Dict[str, Any] = field(default_factory=dict)
+    blocks: List[Dict[str, Any]] = Field(default_factory=list)
+    meta: Dict[str, Any] = Field(default_factory=dict)
     
     @classmethod
     def from_pandoc_json(cls, pandoc_json: Dict[str, Any]) -> PandocAST:

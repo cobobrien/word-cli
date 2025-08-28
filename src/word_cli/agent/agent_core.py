@@ -158,62 +158,84 @@ class WordAgent:
             return
         
         self.state = AgentState.THINKING
-        
+
         # Add user message to history
         user_msg = ConversationMessage(role="user", content=user_input)
         self.conversation_history.append(user_msg)
-        
+
         try:
-            # Get current context
-            context = self.context_manager.get_relevant_context(user_input)
-            
-            # Build messages for Claude
-            messages = self._build_messages_for_claude(context)
-            
-            # Stream response from Claude
-            assistant_msg = ConversationMessage(role="assistant", content="")
-            
-            async for chunk in self._stream_claude_response(messages):
-                if chunk.get("type") == "text":
-                    text = chunk.get("text", "")
-                    assistant_msg.content += text
-                    yield text
-                    
-                elif chunk.get("type") == "tool_use":
-                    # Handle tool calls
-                    self.state = AgentState.EXECUTING
-                    tool_call = ToolCall(
-                        id=chunk.get("id"),
-                        name=chunk.get("name"),
-                        parameters=chunk.get("input", {})
+            # Iteratively call the model until no further tool calls are requested
+            while True:
+                # Get current context for better responses
+                context = self.context_manager.get_relevant_context(user_input)
+
+                # Build messages for Claude from conversation history
+                messages = self._build_messages_for_claude(context)
+
+                # Stream response from Claude for this step
+                assistant_msg = ConversationMessage(role="assistant", content="")
+                executed_tool_results: List[ToolResult] = []
+
+                async for chunk in self._stream_claude_response(messages):
+                    if chunk.get("type") == "text":
+                        text = chunk.get("text", "")
+                        assistant_msg.content += text
+                        if text:
+                            yield text
+
+                    elif chunk.get("type") == "tool_use":
+                        # Handle tool calls
+                        self.state = AgentState.EXECUTING
+                        tool_call = ToolCall(
+                            id=chunk.get("id"),
+                            name=chunk.get("name"),
+                            parameters=chunk.get("input", {})
+                        )
+                        assistant_msg.tool_calls.append(tool_call)
+
+                        # Execute tool
+                        yield f"\n🔧 Using tool: {tool_call.name}\n"
+                        tool_result = await self._execute_tool(tool_call)
+
+                        # Present result to the user
+                        if tool_result.success:
+                            if tool_result.content:
+                                yield f"✅ {tool_result.content}\n"
+                        else:
+                            yield f"❌ Error: {tool_result.error}\n"
+
+                        # Queue tool result to feed back to the model in a follow-up turn
+                        executed_tool_results.append(tool_result)
+
+                # Record assistant turn
+                self.conversation_history.append(assistant_msg)
+
+                # If any tools were used, append a synthetic 'user' message with tool_result blocks
+                if executed_tool_results:
+                    tool_result_msg = ConversationMessage(
+                        role="user",
+                        content="",
+                        tool_results=executed_tool_results
                     )
-                    assistant_msg.tool_calls.append(tool_call)
-                    
-                    # Execute tool
-                    yield f"\n🔧 Using tool: {tool_call.name}\n"
-                    
-                    tool_result = await self._execute_tool(tool_call)
-                    assistant_msg.tool_results.append(tool_result)
-                    
-                    if tool_result.success:
-                        if tool_result.content:
-                            yield f"✅ {tool_result.content}\n"
-                    else:
-                        yield f"❌ Error: {tool_result.error}\n"
-            
-            # Add assistant message to history
-            self.conversation_history.append(assistant_msg)
-            
+                    self.conversation_history.append(tool_result_msg)
+
+                    # Continue loop so the model can incorporate tool results
+                    self.state = AgentState.THINKING
+                    continue
+
+                # No tool calls in this step -> we're done
+                break
+
             # Auto-save if configured and changes were made
             if self.config.auto_save and self.current_document.is_modified:
                 await self._auto_save()
                 yield "\n💾 Changes auto-saved\n"
-            
+
             self.state = AgentState.IDLE
-            
+
         except Exception as e:
             self.state = AgentState.ERROR
-            self.logger.error(f"Error processing message: {e}")
+            self.logger.error(f"Error processing message: {e}", exc_info=True)
             yield f"\n❌ An error occurred: {str(e)}\n"
     
     def _build_messages_for_claude(self, context: DocumentContext) -> List[MessageParam]:
