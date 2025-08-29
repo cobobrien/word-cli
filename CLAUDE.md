@@ -44,6 +44,14 @@ word-cli status
 word-cli save --message "Changes"
 word-cli history
 word-cli diff v1 v2
+
+# AI-powered editing
+word-cli chat document.docx  # Interactive session
+word-cli edit document.docx "Replace all instances of 'foo' with 'bar'"
+word-cli edit document.docx "Update paragraph 3 to include reference to section 2.1"
+
+# Batch operations with preview
+word-cli edit document.docx "Preview: edit paragraph 1 and insert new content after paragraph 2"
 ```
 
 ## Architecture
@@ -58,10 +66,12 @@ The architecture uses a three-layer approach:
 
 ### Key Components
 
-- **`DocumentModel`** (`src/word_cli/core/document_model.py`) - Central document representation
+- **`DocumentModel`** (`src/word_cli/core/document_model.py`) - Central document representation with stable ID tracking
 - **`ASTHandler`** (`src/word_cli/core/ast_handler.py`) - AST navigation and manipulation
 - **Converters** (`src/word_cli/converters/`) - Bidirectional DOCX ↔ AST conversion
 - **Version Control** (`src/word_cli/version/`) - Git-like document versioning
+- **AI Agent** (`src/word_cli/agent/`) - Claude-powered natural language interface
+- **Tool Registry** (`src/word_cli/agent/tools.py`) - 15+ specialized document editing tools
 - **CLI Interface** (`src/word_cli/cli/app.py`) - Typer-based command interface
 
 ### Conversion Pipeline
@@ -77,15 +87,28 @@ The architecture uses a three-layer approach:
 - Atomic transactions with rollback support
 - Change tracking at content, metadata, and style levels
 
+### AI Agent Architecture
+
+The AI agent provides natural language document editing through:
+
+- **Iterative Tool Execution** - Multi-turn conversations with tool result feedback
+- **Specialized Tools** - 15+ tools for search, edit, validate, and batch operations
+- **Preview/Apply Workflow** - Safe editing with preview before applying changes
+- **Context Management** - Smart document context for better AI decisions
+- **Stable ID Tracking** - Content-based IDs for reliable element tracking across edits
+- **Transaction Support** - Atomic operations with rollback capability
+
 ## Development Notes
 
-### Current Status (Phase 1)
+### Current Status 
 - ✅ Core architecture implemented
 - ✅ Basic CLI interface with file operations  
 - ✅ Full version control system
 - ✅ Rich diff visualization
-- 🔄 LLM integration (planned for Phase 2)
-- 🔄 Interactive editing (planned for Phase 2)
+- ✅ LLM integration with Claude API
+- ✅ Interactive editing with AI agent
+- ✅ Batch editing with preview/apply workflow
+- ✅ Tool-based architecture with 15+ specialized document tools
 
 ### Key Design Decisions
 
@@ -109,7 +132,8 @@ src/word_cli/
 ### Dependencies
 - **typer[all]** - CLI framework with rich output
 - **python-docx** - Word document metadata handling
-- **pypandoc** - Pandoc integration for AST
-- **anthropic** - Claude API client (for future phases)
+- **anthropic** - Claude API client for AI agent functionality
 - **rich** - Terminal UI and formatting
 - **pydantic** - Data validation and settings
+
+Note: Pandoc is used via subprocess calls, not through pypandoc library.

@@ -781,8 +781,9 @@ class ApplyEditPlanTool(DocumentTool):
                 if op_type == "edit_paragraph":
                     index = int(op["index"]) - 1
                     new_text = str(op["new_text"])
-                    if index < 0 or index >= len(document.pandoc_ast.blocks):
-                        raise ValueError(f"Paragraph {index+1} is out of range")
+                    total_paragraphs = len(document.pandoc_ast.blocks)
+                    if index < 0 or index >= total_paragraphs:
+                        raise ValueError(f"Paragraph {index+1} is out of range (document has {total_paragraphs} paragraphs)")
                     if not preview:
                         old_block = document.pandoc_ast.blocks[index]
                         old_text = handler._extract_text_from_block(old_block)
@@ -802,8 +803,9 @@ class ApplyEditPlanTool(DocumentTool):
                 elif op_type == "insert_text":
                     position = int(op["position"])  # 1-based index where insertion occurs after this paragraph
                     text = str(op["text"]) 
-                    if position < 0 or position > len(document.pandoc_ast.blocks):
-                        raise ValueError(f"Position {position} is out of range")
+                    total_paragraphs = len(document.pandoc_ast.blocks)
+                    if position < 0 or position > total_paragraphs:
+                        raise ValueError(f"Insert position {position} is out of range (valid range: 0-{total_paragraphs})")
                     if not preview:
                         new_block = handler.create_paragraph(text)
                         handler.insert_block(position, new_block)
@@ -819,8 +821,9 @@ class ApplyEditPlanTool(DocumentTool):
 
                 elif op_type == "delete_paragraph":
                     index = int(op["index"]) - 1
-                    if index < 0 or index >= len(document.pandoc_ast.blocks):
-                        raise ValueError(f"Paragraph {index+1} is out of range")
+                    total_paragraphs = len(document.pandoc_ast.blocks)
+                    if index < 0 or index >= total_paragraphs:
+                        raise ValueError(f"Paragraph {index+1} is out of range (document has {total_paragraphs} paragraphs)")
                     if not preview:
                         old_block = document.pandoc_ast.blocks[index]
                         old_text = handler._extract_text_from_block(old_block)
@@ -864,14 +867,16 @@ class ApplyEditPlanTool(DocumentTool):
                     if preview:
                         summaries.append(f"PREVIEW: replace_all '{find_text}'→'{replace_text}' ({count} potential)")
                 else:
-                    msg = f"Unknown operation type: {op_type}"
+                    supported_ops = "edit_paragraph, insert_text, delete_paragraph, replace_all"
+                    msg = f"Unknown operation type '{op_type}'. Supported types: {supported_ops}"
                     if stop_on_error and not preview:
                         return ToolExecutionResult(success=False, error=msg, changes=changes)
                     summaries.append(f"SKIP: {msg}")
             except Exception as e:
+                error_msg = f"Operation {idx} ({op_type}): {e}"
                 if stop_on_error and not preview:
-                    return ToolExecutionResult(success=False, error=f"Operation {idx} failed: {e}", changes=changes)
-                summaries.append(f"ERROR in op {idx}: {e}")
+                    return ToolExecutionResult(success=False, error=error_msg, changes=changes)
+                summaries.append(f"ERROR: {error_msg}")
 
         content = "\n".join(summaries) if summaries else ("No operations" if preview else "No changes applied")
         return ToolExecutionResult(
