@@ -404,6 +404,26 @@ class DocxToASTConverter:
                 ast_element_id = f"block_{i}"
                 xml_path = f"//w:p[{i+1}]"  # XPath to paragraph
                 mapping.add_mapping(ast_element_id, xml_path, i)
+
+                # Generate a stable ID based on content hash + position
+                try:
+                    # Extract a basic text for hashing
+                    text = ""
+                    if isinstance(block, dict):
+                        t = block.get("t")
+                        c = block.get("c", [])
+                        if t == "Header" and isinstance(c, list) and len(c) >= 3:
+                            # inlines are at c[2]
+                            text = json.dumps(c[2], sort_keys=True)
+                        else:
+                            text = json.dumps(c, sort_keys=True)
+                    raw = f"{i}::{text}"
+                    import hashlib
+                    sid = hashlib.sha256(raw.encode()).hexdigest()[:16]
+                    mapping.stable_ids[ast_element_id] = f"sid_{sid}"
+                except Exception:
+                    # If hashing fails, skip stable id
+                    pass
         
         except Exception:
             # Mapping creation is optional but recommended

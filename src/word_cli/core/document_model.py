@@ -159,6 +159,9 @@ class ASTToXMLMapping:
     
     # Preserved element positions for round-trip fidelity
     element_positions: Dict[str, int] = field(default_factory=dict)  # element_id -> position
+
+    # Stable IDs for blocks to improve tracking across edits/round-trips
+    stable_ids: Dict[str, str] = field(default_factory=dict)  # ast_element_id -> stable_id
     
     def add_mapping(self, ast_element_id: str, xml_path: str, position: int = 0) -> None:
         """Add a bidirectional mapping."""

@@ -30,6 +30,7 @@ class ToolCategory(Enum):
     STYLE = "style"
     REFERENCE = "reference"
     VALIDATION = "validation"
+    BATCH = "batch"
 
 
 @dataclass
@@ -715,6 +716,176 @@ class ValidateDocumentTool(DocumentTool):
             )
 
 
+# BATCH / PLAN TOOL
+
+class ApplyEditPlanTool(DocumentTool):
+    """Apply or preview a structured edit plan consisting of simple operations."""
+
+    name = "apply_edit_plan"
+    description = (
+        "Apply a JSON edit plan with operations like edit_paragraph, insert_text, delete_paragraph, "
+        "and replace_all. Supports preview mode (no changes)."
+    )
+    category = ToolCategory.BATCH
+    parameters = {
+        "plan": {
+            "type": "object",
+            "description": "Edit plan JSON object with an 'operations' list"
+        },
+        "preview": {
+            "type": "boolean",
+            "description": "If true, do not modify the document; return a summary",
+            "default": True
+        },
+        "stop_on_error": {
+            "type": "boolean",
+            "description": "Stop applying operations when one fails (when preview is false)",
+            "default": True
+        }
+    }
+
+    async def execute(
+        self,
+        parameters: Dict[str, Any],
+        document: DocumentModel,
+        version_controller: Optional[VersionController] = None
+    ) -> ToolExecutionResult:
+        plan = parameters.get("plan")
+        preview = parameters.get("preview", True)
+        stop_on_error = parameters.get("stop_on_error", True)
+
+        if not isinstance(plan, dict) or not isinstance(plan.get("operations"), list):
+            return ToolExecutionResult(success=False, error="Invalid plan: expected an object with 'operations' list")
+
+        handler = ASTHandler(document.pandoc_ast)
+        changes: List[DocumentChange] = []
+        summaries: List[str] = []
+
+        def record_change(change: DocumentChange):
+            changes.append(change)
+            if change.description:
+                summaries.append(change.description)
+            else:
+                summaries.append(f"{change.change_type.value} at {change.target_path}")
+
+        for idx, op in enumerate(plan["operations"], 1):
+            if not isinstance(op, dict) or "type" not in op:
+                msg = f"Operation {idx}: invalid format"
+                if stop_on_error and not preview:
+                    return ToolExecutionResult(success=False, error=msg, changes=changes)
+                summaries.append(f"SKIP: {msg}")
+                continue
+
+            op_type = op["type"]
+            try:
+                if op_type == "edit_paragraph":
+                    index = int(op["index"]) - 1
+                    new_text = str(op["new_text"])
+                    if index < 0 or index >= len(document.pandoc_ast.blocks):
+                        raise ValueError(f"Paragraph {index+1} is out of range")
+                    if not preview:
+                        old_block = document.pandoc_ast.blocks[index]
+                        old_text = handler._extract_text_from_block(old_block)
+                        new_block = handler.create_paragraph(new_text)
+                        handler.replace_block(index, new_block)
+                        document.mark_modified()
+                        record_change(DocumentChange(
+                            change_type=ChangeType.CONTENT_MODIFY,
+                            target_path=f"paragraph[{index}]",
+                            old_value=old_text,
+                            new_value=new_text,
+                            description=f"Edited paragraph {index+1}"
+                        ))
+                    else:
+                        summaries.append(f"PREVIEW: edit paragraph {index+1}")
+
+                elif op_type == "insert_text":
+                    position = int(op["position"])  # 1-based index where insertion occurs after this paragraph
+                    text = str(op["text"]) 
+                    if position < 0 or position > len(document.pandoc_ast.blocks):
+                        raise ValueError(f"Position {position} is out of range")
+                    if not preview:
+                        new_block = handler.create_paragraph(text)
+                        handler.insert_block(position, new_block)
+                        document.mark_modified()
+                        record_change(DocumentChange(
+                            change_type=ChangeType.CONTENT_INSERT,
+                            target_path=f"paragraph[{position}]",
+                            new_value=text,
+                            description=f"Inserted text at position {position}"
+                        ))
+                    else:
+                        summaries.append(f"PREVIEW: insert text at position {position}")
+
+                elif op_type == "delete_paragraph":
+                    index = int(op["index"]) - 1
+                    if index < 0 or index >= len(document.pandoc_ast.blocks):
+                        raise ValueError(f"Paragraph {index+1} is out of range")
+                    if not preview:
+                        old_block = document.pandoc_ast.blocks[index]
+                        old_text = handler._extract_text_from_block(old_block)
+                        if handler.delete_block(index):
+                            document.mark_modified()
+                            record_change(DocumentChange(
+                                change_type=ChangeType.CONTENT_DELETE,
+                                target_path=f"paragraph[{index}]",
+                                old_value=old_text,
+                                description=f"Deleted paragraph {index+1}"
+                            ))
+                    else:
+                        summaries.append(f"PREVIEW: delete paragraph {index+1}")
+
+                elif op_type == "replace_all":
+                    find_text = str(op["find"]) 
+                    replace_text = str(op.get("replace", ""))
+                    case_sensitive = bool(op.get("case_sensitive", False))
+                    results = ASTHandler(document.pandoc_ast).find_by_text(find_text, case_sensitive)
+                    count = 0
+                    for pos, block in reversed(results):
+                        block_content = handler._extract_text_from_block(block)
+                        import re
+                        if case_sensitive:
+                            new_content = block_content.replace(find_text, replace_text)
+                        else:
+                            new_content = re.sub(re.escape(find_text), replace_text, block_content, flags=re.IGNORECASE)
+                        if new_content != block_content:
+                            if not preview:
+                                new_block = handler.create_paragraph(new_content)
+                                handler.replace_block(pos.block_index, new_block)
+                                document.mark_modified()
+                                record_change(DocumentChange(
+                                    change_type=ChangeType.CONTENT_MODIFY,
+                                    target_path=f"paragraph[{pos.block_index}]",
+                                    old_value=block_content,
+                                    new_value=new_content,
+                                    description=f"Replace '{find_text}' with '{replace_text}'"
+                                ))
+                            count += 1
+                    if preview:
+                        summaries.append(f"PREVIEW: replace_all '{find_text}'→'{replace_text}' ({count} potential)")
+                else:
+                    msg = f"Unknown operation type: {op_type}"
+                    if stop_on_error and not preview:
+                        return ToolExecutionResult(success=False, error=msg, changes=changes)
+                    summaries.append(f"SKIP: {msg}")
+            except Exception as e:
+                if stop_on_error and not preview:
+                    return ToolExecutionResult(success=False, error=f"Operation {idx} failed: {e}", changes=changes)
+                summaries.append(f"ERROR in op {idx}: {e}")
+
+        content = "\n".join(summaries) if summaries else ("No operations" if preview else "No changes applied")
+        return ToolExecutionResult(
+            success=True,
+            content=content,
+            document_modified=(not preview and len(changes) > 0),
+            changes=changes,
+            data={
+                "preview": preview,
+                "operations": len(plan["operations"]),
+                "applied_changes": len(changes)
+            }
+        )
+
 class ToolRegistry:
     """Registry for all available document tools."""
     
@@ -745,6 +916,9 @@ class ToolRegistry:
             
             # Validation
             ValidateDocumentTool(),
+
+            # Batch / Plan
+            ApplyEditPlanTool(),
         ]
         
         for tool in default_tools:

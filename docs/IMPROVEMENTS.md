@@ -41,7 +41,22 @@ This document explains what was changed, why it matters, and where to look in th
 - Files:
   - `src/word_cli/agent/agent_core.py:146`
 
-### 5) Dependency Hygiene
+### 5) Batch Edit Plan Tool (Preview + Apply)
+- What: Added `apply_edit_plan` tool that accepts a JSON plan with a list of allowed operations (`edit_paragraph`, `insert_text`, `delete_paragraph`, `replace_all`) and supports preview mode.
+- Why: Encourages deterministic, safe, multi-step edits and fits a “plan → preview → apply” workflow. Constrains LLM actions to a typed, auditable subset.
+- Files:
+  - `src/word_cli/agent/tools.py` (new `ApplyEditPlanTool`, added `ToolCategory.BATCH` and registry wiring)
+  - `docs/EDIT_PLAN.md` (schema and usage)
+
+### 6) Stable IDs in AST↔XML Mapping
+- What: Generate stable IDs per block during mapping creation and persist them in versioned mapping.
+- Why: Improves tracking and matching across edits and round-trips, laying groundwork for higher-fidelity mapping.
+- Files:
+  - `src/word_cli/core/document_model.py` (`ASTToXMLMapping.stable_ids`)
+  - `src/word_cli/converters/docx_to_ast.py` (stable ID generation during mapping)
+  - `src/word_cli/version/version_control.py` (persist `stable_ids` in saved state)
+
+### 7) Dependency Hygiene
 - What: Removed unused dependencies: `pypandoc` (unused, we use `subprocess` directly) and `pathlib` (stdlib).
 - Why: Keeps the install smaller and reduces maintenance surface.
 - Files:
@@ -64,4 +79,3 @@ This document explains what was changed, why it matters, and where to look in th
 ## Potential Compatibility Notes
 
 - If a user previously depended on `pypandoc` being installed (though unused), poetry will no longer install it. All conversion logic continues to use Pandoc via `subprocess`.
-

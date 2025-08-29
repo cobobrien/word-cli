@@ -198,6 +198,7 @@ class VersionController:
                 "ast_to_xml": document.mapping.ast_to_xml,
                 "xml_to_ast": document.mapping.xml_to_ast,
                 "element_positions": document.mapping.element_positions,
+                "stable_ids": getattr(document.mapping, 'stable_ids', {}),
             }
         }
         
